@@ -42,36 +42,36 @@ var Accumulator = artifacts.require("./contracts/Accumulator");
 
 module.exports = async function (deployer) {
 
-  await deployer.deploy(G2, {from: "0x12EadC92bA04fcC5De1A6980e938504A8295fC7e"});
+  await deployer.deploy(G2, {from: "0x6419B5373E351607530192844f47d36263F16d68"});
   const g2 = await G2.deployed()
 
   await deployer.link(G2, BnCurve);
-  await deployer.deploy(BnCurve, {from: "0x12EadC92bA04fcC5De1A6980e938504A8295fC7e"});
+  await deployer.deploy(BnCurve, {from: "0x6419B5373E351607530192844f47d36263F16d68"});
   const bnCurve = await BnCurve.deployed()
 
   await deployer.link(BnCurve, Params);
-  await deployer.deploy(Params, {from: "0x12EadC92bA04fcC5De1A6980e938504A8295fC7e"});
+  await deployer.deploy(Params, {from: "0x6419B5373E351607530192844f47d36263F16d68"});
   const params = await Params.deployed()
 
   // await Verify.detectNetwork();
   await deployer.link(BnCurve, Verify);
   await deployer.link(G2, Verify);
-  await deployer.deploy(Verify, params.address, {from: "0x7a4Cd06dD4f8B58B274AB75c01310fDB5c75B56D"});
+  await deployer.deploy(Verify, params.address, {from: "0x0f166ee382eA8aaA1E48F319c7c4EF4656f23dd2"});
   const verify = await Verify.deployed()
   
   await deployer.link(G2, Accumulator);
-  await deployer.deploy(Accumulator, {from: "0x12EadC92bA04fcC5De1A6980e938504A8295fC7e"});
+  await deployer.deploy(Accumulator, {from: "0x6419B5373E351607530192844f47d36263F16d68"});
   const accumulator = await Accumulator.deployed()
 
   await deployer.link(BnCurve, Request);
   await deployer.link(G2, Request);
-  await deployer.deploy(Request, params.address,accumulator.address, {from: "0x12EadC92bA04fcC5De1A6980e938504A8295fC7e"});
+  await deployer.deploy(Request, params.address,accumulator.address, {from: "0x6419B5373E351607530192844f47d36263F16d68"});
   const request = await Request.deployed()
 
-  await deployer.deploy(Issue, params.address, {from: "0x12EadC92bA04fcC5De1A6980e938504A8295fC7e"});
+  await deployer.deploy(Issue, params.address, {from: "0x6419B5373E351607530192844f47d36263F16d68"});
   const issue = await Issue.deployed()
 
-  await deployer.deploy(Opening, params.address, {from: "0x12EadC92bA04fcC5De1A6980e938504A8295fC7e"});
+  await deployer.deploy(Opening, params.address, {from: "0x6419B5373E351607530192844f47d36263F16d68"});
   const opening = await Opening.deployed()
 
   console.log(opening.address);

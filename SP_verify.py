@@ -65,7 +65,7 @@ def decodeToG2(encoded_g2):
 	return (FQ2([encoded_g2[0], encoded_g2[1],]), FQ2([encoded_g2[2], encoded_g2[3],]),)
 
 def decodeVk(encoded_vk):
-  encoded_g2, encoded_g2x, g1y, encoded_g2y = encoded_vk
+  encoded_g2, encoded_g2x, g1y, encoded_g2y, encoded_ycG = encoded_vk
   vk = []
   vk.append(decodeToG2(encoded_g2))
   vk.append(decodeToG2(encoded_g2x))
@@ -74,6 +74,7 @@ def decodeVk(encoded_vk):
   for i in range(len(encoded_g2y)):
     g2y.append(decodeToG2(encoded_g2y[i]))
   vk.append(g2y)
+  vk.append(decodeToG2(encoded_ycG))
   return tuple(vk)	
 
 def getAggregateVerificationKey(title):
@@ -86,11 +87,31 @@ def getAggregateVerificationKey(title):
 	aggregate_vk = decodeVk(encoded_aggregate_vk)
 	return aggregate_vk
 #Taken from Request Service from User.py
-def SP_RequestService(credential, user_addr,disclose_index,aggr_sig,Theta,encoded_disclosed_attr,encoded_public_m,aggregate_vk):
-	title = credential["title"]
+def getPublicParams(title):
+	ac_path = os.path.join(root_dir, title)
+	ac_file_path = os.path.join(ac_path, "public_params.pickle")
+	f = open(ac_file_path,'rb')
+	ans = jsonpickle.decode(pickle.load(f))
+	ans = [(FQ(ans[0][0]), FQ(ans[0][1])), decodeToG2(ans[1]), (FQ(ans[2][0]), FQ(ans[2][1])), decodeToG2(ans[3])]
+	f.close()
+	return ans
+
+def getAccPub(title):
+	ac_path = os.path.join(root_dir, title)
+	file_path = os.path.join(ac_path, "aggregate_vk_a.pickle")
+	f = open(file_path,'rb')
+	verify_address = decodeToG2(jsonpickle.decode(pickle.load(f)))
+	f.close()
+	return verify_address
+
+
+def SP_RequestService(title,disclose_index,Theta,encoded_disclosed_attr,encoded_public_m, pi_c, delta):
+	#title = credential["title"]
 	# schema = downloadSchema(title)
 	# schemaOrder = downloadSchemaOrder(title)
 	params = downloadACParams(title)
+	public_params = getPublicParams(title)
+	pub_key = getAccPub(title)
 	# _, o, _, _, _, _ = params
 
 	# encoded_private_m = encode_attributes(private_m, ac_encode_str)
@@ -110,14 +131,14 @@ def SP_RequestService(credential, user_addr,disclose_index,aggr_sig,Theta,encode
 	# 	else:
 	# 		encoded_public_m.append(public_m[i])
 
-	#aggregate_vk = getAggregateVerificationKey(title)
+	aggregate_vk = getAggregateVerificationKey(title)
 
 	# # proving the possession of AC (Off-chain by user) private_m, disclose_index, disclose_attr, disclose_attr_enc, public_m
 	# Theta, aggr = ProveCred(params, aggregate_vk, aggr_sig, encoded_private_m, disclose_index, disclose_attr, disclose_attr_enc, encoded_public_m)
 	# (kappa, nu, rand_sig, proof, Aw, _timestamp) = Theta
-	# # Aw, _timestamp, proof = proof_v
+	# #Aw, _timestamp, proof = proof_v
 
-	#Uncomment below to do SP Verification on-chain
+	# #Uncomment below to do SP Verification on-chain
 	# send_kappa = ((kappa[0].coeffs[1].n, kappa[0].coeffs[0].n), (kappa[1].coeffs[1].n, kappa[1].coeffs[0].n))
 	# send_nu = (nu[0].n, nu[1].n)
 	# send_sigma = [(rand_sig[i][0].n, rand_sig[i][1].n) for i in range(len(rand_sig))]
@@ -129,10 +150,13 @@ def SP_RequestService(credential, user_addr,disclose_index,aggr_sig,Theta,encode
 	# 	send_aggr = ((0, 0), (0, 0))
 
 	# str_public_m = [str(public_m[i]) for i in range(len(public_m))]
-	#encoded_disclosed_attr = encode_attributes(disclose_attr, disclose_attr_enc)
-	tf = VerifyCred(params, aggregate_vk, Theta, disclose_index, encoded_disclosed_attr, encoded_public_m)
+	# encoded_disclosed_attr = encode_attributes(disclose_attr, disclose_attr_enc)
+	st = time.time()
+	tf = VerifyCred(params, aggregate_vk, Theta, disclose_index, encoded_disclosed_attr, encoded_public_m, pi_c, public_params, pub_key, delta)
+	et = time.time()
+	print("Credential verify", et-st)
 	print("Verify Cred : ")
-	print(tf)
+	return tf
 	#off-chain SP verification
 	#tx_hash = verify_contract.functions.VerifyCred(title, send_theta, str_public_m, send_Aw, send_aggr, disclose_index, str_disclose_attr, disclose_attr_enc, _timestamp).transact({'from':user_addr})
 

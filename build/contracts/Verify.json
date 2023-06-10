@@ -38984,15 +38984,15 @@
     "5777": {
       "events": {},
       "links": {
-        "G": "0x5C8152224f2183df816FC0d8a1ee93a2793Ba4e4",
-        "BN256G2": "0x928f6b0F2c19EcCb11c7CA57B2B85393387dCDD7"
+        "G": "0x3D25208b97aC9B6719A9F9516139F597bC50b747",
+        "BN256G2": "0x641FB66f949C95C03CF5A2138220fc5649aDd12a"
       },
-      "address": "0xb42f95D1841E1109E90A050AE9B73492A042e3CD",
-      "transactionHash": "0x6442e598af47717e98997eb083fa4e804b43d4cb9bd2499e8b3032e95aabca79"
+      "address": "0x183b0C7741b87c9aFFc1736471502B6D72140282",
+      "transactionHash": "0x5ebe75844a8fb0f38707fc43586a1c62ab1073cb10bdb685e410a39345f81b0d"
     }
   },
   "schemaVersion": "3.4.13",
-  "updatedAt": "2023-05-23T11:27:13.814Z",
+  "updatedAt": "2023-06-09T10:07:55.007Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

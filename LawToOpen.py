@@ -73,7 +73,7 @@ for session in service_dict.keys():
 session = int(input("Enter session id : "))
 
 open_sigma = service_dict[session][credential_id][0]
-
+print(open_sigma)
 # count = 0
 for opener_ip_port in opener_ip_map_list:
 	# if count == 0:

@@ -245,6 +245,13 @@ def encodeG2(g2):
 def decodeToG2(encoded_g2):
 	return (FQ2([encoded_g2[0], encoded_g2[1],]), FQ2([encoded_g2[2], encoded_g2[3],]),)
 
+def encodeGT(g2):
+	return (g2.coeffs[0].n, g2.coeffs[1].n, g2.coeffs[2].n, g2.coeffs[3].n,
+			g2.coeffs[4].n, g2.coeffs[5].n, g2.coeffs[6].n, g2.coeffs[7].n,
+			g2.coeffs[8].n, g2.coeffs[9].n, g2.coeffs[10].n, g2.coeffs[11].n)
+
+
+
 def encodeG2List(g2_list):
   encoded_g2_list = []
   for g2 in g2_list:
@@ -351,6 +358,15 @@ def getTotalOpeners(title):
 	f.close()
 	return no
 
+def getPublicParams():
+	ac_path = os.path.join(root_dir, ac_title)
+	ac_file_path = os.path.join(ac_path, "public_params.pickle")
+	f = open(ac_file_path,'rb')
+	ans = jsonpickle.decode(pickle.load(f))
+	ans = [(FQ(ans[0][0]), FQ(ans[0][1])), decodeToG2(ans[1]), (FQ(ans[2][0]), FQ(ans[2][1])), decodeToG2(ans[3])]
+	f.close()
+	return ans
+
 def getTotalValidators(title):
 	ac_path = os.path.join(root_dir, ac_title)
 	ac_file_path = os.path.join(ac_path, "nv.pickle")
@@ -431,6 +447,13 @@ def getAccAddress():
 	f.close()
 	return verify_address
 
+def getAccPub(title):
+	ac_path = os.path.join(root_dir, title)
+	file_path = os.path.join(ac_path, "aggregate_vk_a.pickle")
+	f = open(file_path,'rb')
+	verify_address = decodeToG2(jsonpickle.decode(pickle.load(f)))
+	f.close()
+	return verify_address
 # w3 = Web3(Web3.WebsocketProvider(args.rpc_endpoint, websocket_timeout=60))
 w3 = Web3(Web3.HTTPProvider(args.rpc_endpoint, request_kwargs = {'timeout' : 300}))
 
@@ -439,7 +462,8 @@ request_address = getRequestAddress()
 issue_address = getIssueAddress()
 verify_address = getVerifyAddress()
 acc_address = getAccAddress()
-
+public_params = getPublicParams()
+acc_pub_key = getAccPub(ac_title)
 # ------------------------------------------------------------------------
 # Params.sol
 # All the TTP system parameters and Aggregated Validators Key
@@ -534,7 +558,7 @@ def getIncludeIndexes(title, _dependency):
 # 	f = open(ac_file_path,'wb')
 # 	pickle.dump(data, f)
 # 	f.close()
-
+global commm
 def CredentialRequest(title, vcerts, combination, public_m = []): #should be encoded public_m
 	assert checkCombinations(title, combination), "No such combination."
 	params = downloadACParams(title)
@@ -565,12 +589,16 @@ def CredentialRequest(title, vcerts, combination, public_m = []): #should be enc
 	include_indexes = getIncludeIndexes(title, combination)
 	#(acc_op_kr,acc_va_kr) = create_accumulator_shares(params,no,nv,to,tv)
 
+	st = time.time()
 	Lambda, os = PrepareCredRequest(params, aggregate_vk, to, no, opks, prevParams, all_encoded_attr, include_indexes, public_m)
-	
+	et = time.time()
+
+	print("PrepareCredRequest", et-st)
 	(cm, commitments, pi_s, hp, C, pi_o, Dw, Ew, hr, bo) = Lambda
 	#anything with "send" appended is making that particular variable as SC compatible.
 	send_cm = (cm[0].n, cm[1].n)
 	send_commitments = [(commitments[i][0].n, commitments[i][1].n) for i in range(len(commitments))]
+	commm = send_commitments
 	send_ciphershares= [([([C[i][j][0].coeffs[1].n,C[i][j][0].coeffs[0].n],[C[i][j][1].coeffs[1].n, C[i][j][1].coeffs[0].n]) for j in range(2)],) for i in range(len(C))]
 	send_compressed_cipher = (send_commitments, send_ciphershares)
 	private_m = []
@@ -600,7 +628,7 @@ def CredentialRequest(title, vcerts, combination, public_m = []): #should be enc
 
 	et = time.time()
 	print("Time for Verification at Smart Contract is:",et-st)
-	return Lambda, os
+	return Lambda, os, commm
 
 # def issue_event_filter(contract):
 # 	transfer_filter = contract.events.emitIssue.createFilter(fromBlock="0x0", toBlock='latest')
@@ -634,6 +662,7 @@ def ReceivePartialCredentials(title, issue_filter, signs, os):
 	credential_id = params_contract.functions.getMapCredentials(title).call()
 	assert credential_id != 0, "No such AC."
 	tv = getTotalValidators(title)
+	
 	signs_count = 0
 	while True:
 		signature_log = issue_filter.get_new_entries()
@@ -654,7 +683,10 @@ def ReceivePartialCredentials(title, issue_filter, signs, os):
 			issuer_id = int(validator_dict[issuer_address])
 			vk = getVerificationKey(title,issuer_id)
 			if signs[issuer_id-1] is None:
+				st = time.time()
 				signs[issuer_id-1] = Unblind(params, vk, blind_sig, os)
+				et = time.time()
+				print("Unblind", et-st)
 				print("Unblind")
 				print(issuer_id)
 				print(signs[issuer_id - 1])
@@ -685,7 +717,7 @@ def getAttributes(title, vcerts, combination, public_m = []):
 			i += 1
 	return attributes
 
-def RequestService(credential, user_addr,kr):
+def RequestService(credential, user_addr,kr, W):
 	title = credential["title"]
 	print("The available policies are : ")
 	total_policies = verify_contract.functions.gettotalPolicies(title).call()
@@ -728,15 +760,66 @@ def RequestService(credential, user_addr,kr):
 			encoded_public_m.append(public_m[i])
 
 	aggregate_vk = getAggregateVerificationKey(title)
-
+	acc_pub = getAccPub(title)
 	# proving the possession of AC (Off-chain by user) private_m, disclose_index, disclose_attr, disclose_attr_enc, public_m
-	Theta, aggr = ProveCred(params, aggregate_vk, aggr_sig, encoded_private_m, disclose_index, disclose_attr, disclose_attr_enc, encoded_public_m,kr)
+	st = time.time()
+	pi_c, Theta, aggr = ProveCred(params, aggregate_vk, aggr_sig, encoded_private_m, disclose_index, disclose_attr, disclose_attr_enc, encoded_public_m,acc_pub, public_params,kr, W)
+	et = time.time()
+	print("Credential proof", et-st)
 	(kappa, nu, rand_sig, proof, Aw, _timestamp) = Theta
-	# Aw, _timestamp, proof = proof_v
+	(commit, pie_I_1, pie_I_2, R1, R2, R3, s_r,s_tau_1, s_tau_2, s_delta_1, s_delta_2) = pi_c
+	send_commit = encodeG2(commit)
+	send_pi_I_1 = (pie_I_1[0].n, pie_I_1[1].n)
+	send_pi_I_2 = (pie_I_2[0].n, pie_I_2[1].n)
+	send_R1 = (R1[0].n, R1[1].n)
+	send_R2 = (R2[0].n, R2[1].n)
+	send_R3 = encodeGT(R3)
+	send_kappa = ((kappa[0].coeffs[1].n, kappa[0].coeffs[0].n), (kappa[1].coeffs[1].n, kappa[1].coeffs[0].n))
+	send_nu = (nu[0].n, nu[1].n)
+	send_sigma = [(rand_sig[i][0].n, rand_sig[i][1].n) for i in range(len(rand_sig))]
+	send_Aw =  ((Aw[0].coeffs[1].n, Aw[0].coeffs[0].n), (Aw[1].coeffs[1].n, Aw[1].coeffs[0].n))
+	send_theta = (send_kappa, send_nu, send_sigma, proof, send_Aw, _timestamp)
+	send_pi_c = (send_commit, send_pi_I_1, send_pi_I_2, send_R1, send_R2, send_R3, s_r, s_tau_1, s_tau_2, s_delta_1, s_delta_2)
+	print("commit")
+	print(send_commit)
+	print("R1")
+	print(send_R1)
+	print("R2")
+	print(send_R2)
+	print("R3")
+	print(send_R3)
+	if aggr:
+		send_aggr = ((aggr[0].coeffs[1].n, aggr[0].coeffs[0].n), (aggr[1].coeffs[1].n, aggr[1].coeffs[0].n))
+	else:
+		send_aggr = ((0, 0), (0, 0))
 	encoded_disclosed_attr = encode_attributes(disclose_attr, disclose_attr_enc)
-	#Sending to SP_verify for verifying the proof. 
-	SP_RequestService(credential, user_addr,disclose_index,aggr_sig,Theta,encoded_disclosed_attr,encoded_public_m,aggregate_vk)
+	#Sending to SP_verify for verifying the proof.
+	title=credential["title"]
+	send_to_SP(title,disclose_index,send_theta,encoded_disclosed_attr,encoded_public_m, send_pi_c)
 # -------------------------------------------------------------------------------------------------
+def send_to_SP(a,c,d,e,f, g):
+	ip, port = "127.0.0.1", "9000"
+	try:
+		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		print ("Socket successfully created")
+	except socket.error as err:
+		print ("socket creation failed with error %s" %(err))
+	s.connect((ip, int(port)))
+	print("connected to port : ", port)
+	try:
+		validator = {"title": a,"disclose_index":c,"theta": d, "enc_disc_attr": e,"enc_public_m": f, "pi_c": g}
+		validator = jsonpickle.encode(validator)
+		print("validator")
+		print(validator)
+		s.send(validator.encode())
+		response = s.recv(8192).decode()
+		print("Response: " + str(response))
+	except Exception as e:
+		s.shutdown(socket.SHUT_RDWR)
+		print(e)
+	finally:
+		s.close()
+
 def get_kr():
 	ac_file_path = os.path.join(root_dir,"blockchain")
 	ac_file_path = os.path.join(ac_file_path,"kr.pickle")
@@ -745,6 +828,22 @@ def get_kr():
 	f.close()
 	return data
 
+def SelfRevocation(kr, W, sig, co):
+	a1 = (W[0].n, W[1].n)
+	H = (sig[0][0].n,sig[0][1].n)
+	S = (sig[1][0].n,sig[1][1].n)
+	acc_contract.functions.verify_revocation_request(kr,a1, H, S, co).transact({'from':user_addr,'gas': 100000000})
+
+# def updateWitness(W,time, kr):
+#     (wl, bl) = acc_contract.functions.updateWitness(time).transact({'from':user_addr})
+#     for i in wl:
+# 	    if i == 0:
+# 		    continue
+# 	    else:
+# 		    W = 
+	    
+#     for i in bl:
+	    
 combination = list(map(str, input("Enter a combination you want to use for credential request (Identity Certificate,Income Certificate)").split(",")))
 # combination = ["Identity Certificate", "Income Certificate"] # give some input here. like selecting a combination.
 print(combination)
@@ -764,10 +863,10 @@ nv = getTotalValidators(ac_title)
 signs = [None] * nv
 tv = getThresholdValidators(ac_title)
 issue_filter = issue_contract.events.emitIssue.createFilter(fromBlock="0x0", toBlock='latest')
-
+fi = time.time()
 print("Credential Request is about to happen")
 start = time.time()
-Lambda, oss = CredentialRequest(ac_title, vcerts, combination, public_m)
+Lambda, oss, tim = CredentialRequest(ac_title, vcerts, combination, public_m)
 end = time.time()
 print("Entire Credential Request time is:",end-start)
 
@@ -776,11 +875,11 @@ print("Credential Request is sent")
 start = time.time()
 ReceivePartialCredentials(ac_title, issue_filter, signs, oss)
 end = time.time()
-print("Entire Pcred receiving time is (includes Params SC):",end-start)
 
 print("received all partial credentials")
 print("signs")
 print(signs)
+start2 = time.time()
 tx_hash = issue_contract.functions.get_kr_W(ac_title).transact({'from':user_addr})
 w3.eth.waitForTransactionReceipt(tx_hash)
 
@@ -788,13 +887,16 @@ acc_filter = acc_contract.events.send_W_kr.createFilter(fromBlock="0x0", toBlock
 asd = False
 kr = None
 W = None
+end2 = None
 while True:
 	storage = acc_filter.get_new_entries()
 	for i in range(len(storage)):
+		end2 = time.time()
 		id = storage[i]['args']["request_id"]
 		kr = storage[i]['args']["kr"]
 		W =  storage[i]["args"]["W"]
-		W = (FQ(W[0]),FQ(W[1]))
+		W = ((FQ(W[0]),FQ(W[1])))
+		timestamp_W = int(storage[i]["args"]["timestamp"])
 		print("id")
 		print(id)
 		print("kr")
@@ -803,17 +905,28 @@ while True:
 		print(W)
 		asd =True
 	if asd:
-		break	
+		break
+
+print("Entire Pcred receiving time is (includes Params SC):",(end-start)+(end2-start2))
 print("kr")
 print(kr)
+st = time.time()
 aggr_sig = AggCred(params, signs)
+et = time.time()
+print("Aggregate", et-st)
 print("Aggregated credential")
 print(aggr_sig)
 credential["credential"] = aggr_sig
-
+gb = time.time()
+print("CredentialIssuance time", gb-fi)
 print("Service request is sent")
 start = time.time()
-RequestService(credential, user_addr,kr)
+RequestService(credential, user_addr,kr, W)
 end = time.time()
 print("Entire Service Requesting time is (includes 4 Verify SC calls):",end-start)
 
+st = time.time()
+SelfRevocation(kr,W, aggr_sig, tim)
+et = time.time()
+print("SelfRevocation(add with verification time for total)", et-st)
+# updateWitness(W,timestamp_W, kr)

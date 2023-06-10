@@ -6433,12 +6433,12 @@
     "5777": {
       "events": {},
       "links": {},
-      "address": "0x024650a6e6862C7E8BCd863f1B094f1873DC0F02",
-      "transactionHash": "0xa739885c770e004484c85604cbbc0b1449f0063a220577d5f1a248f4ad664324"
+      "address": "0xB2137e1DF2C10985C3988dc28974597724873c63",
+      "transactionHash": "0x410e010f6fa6422a55b8f9ad3c37fb43282adf6aeba1477a5333d1c85facd258"
     }
   },
   "schemaVersion": "3.4.13",
-  "updatedAt": "2023-05-23T11:27:13.839Z",
+  "updatedAt": "2023-06-09T10:07:55.028Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

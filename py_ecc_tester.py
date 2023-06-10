@@ -85,6 +85,18 @@ def ttp_accumelator_keygen(params,t,n):
 
     return (sk,vk)
 
+def aggr(s):
+    filter = [s[i] for i in range(len(s)) if s[i] is not None]
+    indexes = [i+1 for i in range(len(s)) if s[i] is not None]
+
+    l = lagrange_basis(indexes,curve_order)
+    kr = 0
+    for i in range(len(filter)):
+        kr += ((l[i]*s[i])%curve_order)
+        kr = kr%curve_order
+    return kr
+
+
 def agg_key_accumulator(params, vk):
     (G, o, g1, hs, g2, e) = params
 
@@ -93,7 +105,7 @@ def agg_key_accumulator(params, vk):
 
     l = lagrange_basis(indexes,o)
 
-    aggr_vk = ec_sum([multiply(vk[i], l[i]) for i in range(len(filter))])
+    aggr_vk = ec_sum([multiply(filter[i],  l[i]) for i in range(len(filter))])
 
     return aggr_vk
 
@@ -105,10 +117,8 @@ def to_binary256(point) :
         return point.to_bytes(32, 'big')
     if isinstance(point[0], FQ):
         point1 = point[0].n.to_bytes(32, 'big')
-        print(point1)
         point2 = point[1].n.to_bytes(32, 'big')
-        print(point2)
-        print(point1 + point2)
+        
         return sha256(point1+point2).digest()
     if isinstance(point[0], FQ2):
         point1 = point[0].coeffs[0].n.to_bytes(32, 'big') + point[0].coeffs[1].n.to_bytes(32, 'big')
@@ -345,6 +355,21 @@ def verify_pi_o(params, commitments, C, cm, hidden_P, h_r, b_o, aggr_vk, opk, pr
             return False 
     return True
 
+def VerifyRevokeCred(kr,W,H,S,cm, delta, pub_key, aggre):
+    (_, alpha, _,g2_beta, YC) = aggre
+    kr_g2 = multiply(G2,kr)
+    a = add(kr_g2, pub_key)
+    c = pairing(G2, delta) == pairing(a, W)
+    print("c")
+    print(c)
+    f = pairing(alpha, H)
+    for i in range(len(cm)):
+        f = f * pairing(g2_beta[i], cm[i])
+    f = f*pairing(YC, multiply(H,kr))
+
+    v = pairing(G2, S) == f
+    return v and c
+
 def PrepareCredRequest(params, aggr_vk, to, no, opk, prevParams, all_attr, include_indexes, public_m=[]):
     private_m = []
     for i in range(len(all_attr)):
@@ -495,7 +520,7 @@ def make_pi_v(params, aggr_vk, sigma, private_m, disclose_index, disclose_attr, 
     rkr = (wkr - c*kr)%o
     return (Aw, _timestamp, (c, rm, rt,rkr))
 
-def ProveCred(params, aggr_vk, sigma, private_m, disclose_index, disclose_attr, disclose_attr_enc, public_m,kr):
+def ProveCred(params, aggr_vk, sigma, private_m, disclose_index, disclose_attr, disclose_attr_enc, public_m,acc_pub, pp,kr, W):
     assert len(private_m) > 0
     (G, o, g1, hs, g2, e) = params
     (g2, alpha, _, beta,ycG) = aggr_vk
@@ -522,7 +547,86 @@ def ProveCred(params, aggr_vk, sigma, private_m, disclose_index, disclose_attr, 
     aggr = None
     if len(public_m) != 0:
         aggr = ec_sum([multiply(beta[i+len(private_m)], public_m[i]) for i in range(len(public_m))])
-    return (Theta, aggr)
+    
+    pi_c = generate_pi_c(pp, acc_pub,kr,W)
+
+    return (pi_c,Theta, aggr)
+
+def generate_pi_c(pp,pb,kr,W):
+    
+    (g1,g2,g,h2) = pp
+    r = genRandom()
+    print("r")
+    print(r)
+    tau1 = genRandom()
+    print("tau1")
+    print(tau1)
+    tau2 = genRandom()
+    print("tau2")
+    print(tau2)
+    commit = add(multiply(h2, r), multiply(g2, kr))
+    print("commit")
+    print(commit)
+    C_I = add(commit, pb)
+    print("C_I")
+    print(C_I)
+    delta_1 = (tau1*r)%curve_order
+    delta_2 = (tau2*r)%curve_order
+
+    print("delta_1")
+    print(delta_1)
+    print("delta_2")
+    print(delta_2)
+    pie_I_1 = add(multiply(g1,tau1), multiply(g, tau2))
+    print("pie_I_1")
+    print(pie_I_1)
+    pie_I_2 = add(W, multiply(g,tau1))
+    print("pie_I_2")
+    print(pie_I_2)
+    r_r = random.randint(2, curve_order)
+    print("r_r")
+    print(r_r)
+    r_tau_1 = random.randint(2, curve_order)
+    print("r_tau_1")
+    print(r_tau_1)
+    r_tau_2 = random.randint(2, curve_order)
+    print("r_tau_2")
+    print(r_tau_2)
+    r_delta_1 = random.randint(2, curve_order)
+    print("r_delta_1")
+    print(r_delta_1)
+    r_delta_2 = random.randint(2, curve_order)
+    print("r_delta_2")
+    print(r_delta_2)
+    R1 = add(multiply(g1, r_tau_1), multiply(g,r_tau_2))
+    print("R1")
+    print(R1)
+    R2 = add(add(multiply(pie_I_1, r_r),multiply(g1, (r_delta_1*(-1))%curve_order)),multiply(g, (r_delta_2*(-1))%curve_order))
+    print("R2")
+    print(R2)
+    R3 = (pairing(C_I, multiply(g, r_tau_1))) * (pairing(h2, multiply(g,(-1*r_delta_1)%curve_order))) * (pairing(h2, multiply(pie_I_2, r_r)))
+    print("R3")
+    print(R3)
+    c = to_challenge([g1,g2,g,h2, commit])
+    print("c")
+    print(c)
+    s_r = (r_r + (c*r))%curve_order
+    print("s_r")
+    print(s_r)
+    s_tau_1 = (r_tau_1 + (c*tau1))%curve_order
+    print("s_tau_1")
+    print(s_tau_1)
+    s_tau_2 = (r_tau_2 + (c*tau2))%curve_order
+    print("s_tau_2")
+    print(s_tau_2)
+    s_delta_1 = (r_delta_1 + (c*delta_1))%curve_order
+    print("s_delta_1")
+    print(s_delta_1)
+    s_delta_2 = (r_delta_2 + (c*delta_2))%curve_order
+    print("s_delta_2")
+    print(s_delta_2)
+
+    return (commit, pie_I_1, pie_I_2, R1, R2, R3, s_r,s_tau_1, s_tau_2, s_delta_1, s_delta_2)
 
 def verify_pi_v(params, aggr_vk, sigma, kappa, nu, proof, disclose_index, disclose_attr, timestamp):
     (G, o, g1, hs, g2, e) = params
@@ -550,7 +654,7 @@ def verify_pi_v(params, aggr_vk, sigma, kappa, nu, proof, disclose_index, disclo
     # compute the challenge prime
     return c == to_challenge([g1, g2, alpha, Aw, Bw, kappa]+ hs + beta + disclose_attr + [timestamp])
 
-def VerifyCred(params, aggr_vk, Theta, disclose_index, disclose_attr, public_m=[]):
+def VerifyCred(params, aggr_vk, Theta, disclose_index, disclose_attr, public_m, pi_c, pp, pb, delta):
     (G, o, g1, hs, g2, e) = params
     (g2, _, _, beta,_) = aggr_vk
     (kappa, nu, sigma, pi_v, _, timestamp) = Theta
@@ -563,8 +667,40 @@ def VerifyCred(params, aggr_vk, Theta, disclose_index, disclose_attr, public_m=[
     aggr = None
     if len(public_m) != 0:
         aggr = ec_sum([multiply(beta[i+len(disclose_index)], public_m[i]) for i in range(len(public_m))])
-    return not is_inf(h) and e(add(kappa, aggr), h) == e(g2, add(s, nu))
+    
+    ans = verify_pi_c(pi_c, pp, pb, delta)
+    return not is_inf(h) and e(add(kappa, aggr), h) == e(g2, add(s, nu)) and ans
 
+def verify_pi_c(pi_c, pp, pb, delta):
+    (commit, pie_I_1, pie_I_2, R1, R2, R3, s_r,s_tau_1, s_tau_2, s_delta_1, s_delta_2) = pi_c
+    (g1, g2,g,h2) = pp
+    print("pp")
+    print(pp)
+    print("pb")
+    print(pb)
+    C_I = add(commit, pb)
+    print("C_I")
+    print(C_I)
+    c = to_challenge([g1,g2,g,h2, commit])
+    ans1 = add(add(multiply(pie_I_1, (c*(-1))%curve_order), multiply(g1, s_tau_1)), multiply(g,s_tau_2))
+    ans2 = add(add(multiply(pie_I_1, s_r), multiply(g1, (s_delta_1*(-1))%curve_order)), multiply(g,(s_delta_2*(-1))%curve_order))
+    ans3 = R3 * (pairing(C_I, multiply(pie_I_2,c)))
+    ans4 = (pairing(C_I,multiply(g, s_tau_1))) * (pairing(h2, multiply(g, ((-1)*s_delta_1)%curve_order))) *(pairing(h2,multiply(pie_I_2, s_r))) * (pairing(g2, multiply(delta, c)))
+
+    print("R1")
+    print(R1)
+    print("ans1")
+    print(ans1)
+    print("R2")
+    print(R2)
+    print("ans2")
+    print(ans2)
+    print("ans3")
+    print(ans3)
+    print("ans4")
+    print(ans4)
+
+    return (R1 == ans1) and (R2 == ans2) and (ans3 == ans4)
 #deprecated
 def open_keygen(params, no, to):
     assert no >= to and to > 0

@@ -424,7 +424,13 @@ f = open(ac_file_path,'wb')
 json_aggregate_vk = jsonpickle.encode(encoded_aggregate_vk_a)
 pickle.dump(json_aggregate_vk, f)
 f.close()
-
+ac_file_path = os.path.join(ac_path, "public_params.pickle")
+f = open(ac_file_path,'wb')
+h = multiply(G1,genRandom())
+l = [(G1[0].n,G1[1].n),encodeG2(G2),(h[0].n, h[1].n), encodeG2(multiply(G2, genRandom()))]
+l = jsonpickle.encode(l)
+pickle.dump(l, f)
+f.close()
 # -------------------------------------------------------------
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);

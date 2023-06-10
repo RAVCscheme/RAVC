@@ -4,25 +4,19 @@ import os
 from py_ecc_tester import *
 import pickle
 import jsonpickle
-root_dir = "/home/neel/acad/DTRAC/ravc-main/ROOT"
-def getAccuAddress():
-	file_path = os.path.join(root_dir, "accumulator_address.pickle")
-	f = open(file_path,'rb')
-	params_address = pickle.load(f)
-	f.close()
-	return params_address
 
-w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:7545", request_kwargs = {'timeout' : 3000}))
-
-# ------------------------------------------------------------------------
-# Params.sol
-# All the TTP system parameters and Aggregated Validators Key
-tf = json.load(open('./build/contracts/Accumulator.json'))
-params_address = Web3.toChecksumAddress("0x7b7Ff6b94A94dEBFE6b865657e853F9342d7A105")
-acc_contract = w3.eth.contract(address = params_address, abi = tf['abi'])
-print("acc_contract")
-print(acc_contract)
-tx_hash = acc_contract.functions.set_accumulator(3,2,3,2).call()
-print(tx_hash)
-ans = acc_contract.functions.generate_kr_shares().transact({})
-print(ans)
+print(G1)
+sec_shares = create_accumulator_shares(curve_order, 3,2,3,2)
+kr_shares = create_accumulator_shares(curve_order,3,2,3,2)
+ya = sec_shares[0]
+kr = kr_shares[0]
+ans1 = multiply(G1,(ya+kr)%curve_order)
+print("ans1")
+print(ans1)
+opner_ya_shares = sec_shares[1]
+opner_kr_shares = kr_shares[1]
+a = [multiply(G1,(opner_ya_shares[i] + opner_kr_shares[i])) for i in range(len(opner_kr_shares))]
+params = (0,curve_order,0,0,0,0)
+ans2 = agg_key_accumulator(params, a)
+print("ans2")
+print(ans2)

@@ -34,7 +34,6 @@ root_dir = "/home/neel/acad/DTRAC/ravc-main/ROOT"
 
 ac_path = os.path.join(root_dir, args.title)
 ac_file_path = os.path.join(ac_path, "openersList.pickle")
-sender_kr = {}
 
 f = open(ac_file_path,'rb')
 openersList = pickle.load(f)
@@ -382,7 +381,15 @@ updated_count = 0
 pending_requests_lock = threading.Lock()
 wait_initially = threading.Event()
 wait_initially.clear()
-
+def getAccPub(title):
+	ac_path = os.path.join(root_dir, title)
+	file_path = os.path.join(ac_path, "aggregate_vk_a.pickle")
+	f = open(file_path,'rb')
+	verify_address = decodeToG2(jsonpickle.decode(pickle.load(f)))
+	f.close()
+	return verify_address
+aggre_pub_key = getAggregateVerificationKey(args.title)
+acc_pub_key = getAccPub(args.title)
 # def get_kr_share(sender,id):
 # 	time.sleep(10)
 # 	ac_file_path = os.path.join(root_dir,"blockchain")
@@ -398,11 +405,13 @@ wait_initially.clear()
 def listen_to_requests():#listening to emit events
 	wait_initially.wait()
 	request_filter = request_contract.events.emitRequest.createFilter(fromBlock="0x0", toBlock='latest')
+	acc_filter = acc_contract.events.send_self_revocation.createFilter(fromBlock="0x0", toBlock='latest')
 	issue_filter = issue_contract.events.get_ya_shares.createFilter(fromBlock="0x0", toBlock='latest')
 	credential_id = params_contract.functions.getMapCredentials(args.title).call()
 	assert credential_id != 0, "No such AC."
 	while True:
 		storage_log = request_filter.get_new_entries()
+		storage_log_2 = acc_filter.get_new_entries()
 		for i in range(len(storage_log)):
 			current_credential_id = storage_log[i]['args']['id']
 			if current_credential_id != credential_id :
@@ -420,7 +429,6 @@ def listen_to_requests():#listening to emit events
 			kr = int(opener_kr_share[int(args.id)-1])
 			print("kr")
 			print(kr)
-			sender_kr.setdefault(sender,kr)
 			vcerts = []
 			for i in range(len(encoded_vcerts)):
 				vcerts.append(((FQ(encoded_vcerts[i][0]), FQ(encoded_vcerts[i][1])), (encoded_vcerts[i][2], encoded_vcerts[i][3])))
@@ -433,7 +441,7 @@ def listen_to_requests():#listening to emit events
 				ciphershares.append(((FQ2([encoded_ciphershares[i][1], encoded_ciphershares[i][0],]), FQ2([encoded_ciphershares[i][3],encoded_ciphershares[i][2],]),), (FQ2([encoded_ciphershares[i][5], encoded_ciphershares[i][4],]), FQ2([encoded_ciphershares[i][7],encoded_ciphershares[i][6],]),)))
 			Lambda = (cm, commitments, ciphershares, public_m, vcerts, combination)
 			pending_requests_lock.acquire()
-			pending_requests.append((sender,cm, ciphershares[int(args.id)-1], public_m, vcerts, combination, opener_kr_share))
+			pending_requests.append((sender,cm, ciphershares[int(args.id)-1], public_m, vcerts, combination,kr))
 			pending_requests_lock.release()
 			asd = False
 			while True:
@@ -447,12 +455,40 @@ def listen_to_requests():#listening to emit events
 						continue
 					ans = compute_hash(params, cm)
 					s = int.from_bytes(to_binary256(ans), 'big', signed=False)
-					tx_hash = acc_contract.functions.recieve_ya_share(int(args.id),accumulator_secret_key,s).transact({'from': args.address})
+					a1 = multiply(G1, (accumulator_secret_key + kr) % curve_order)
+					a1 = (a1[0].n, a1[1].n)
+					tx_hash = acc_contract.functions.recieve_ya_share(int(args.id),a1,s).transact({'from': args.address, 'gas': 100000000})
 					w3.eth.waitForTransactionReceipt(tx_hash)
 					print("accum_sec_sent")
-					print(accumulator_secret_key)
+					print(a1)
 				if asd:
 					break
+		
+		for i in range(len(storage_log_2)):
+			kr = storage_log_2[i]['args']['kr']
+			W = storage_log_2[i]['args']['W']
+			H = storage_log_2[i]['args']['H']
+			S = storage_log_2[i]['args']['S']
+			cm = storage_log_2[i]['args']['cm']
+			delta = acc_contract.functions.get_delta().call()
+			delta = (FQ(delta[0]), FQ(delta[1]))
+			W = (FQ(W[0]), FQ(W[1]))
+			H = (FQ(H[0]), FQ(H[1]))
+			S = (FQ(S[0]), FQ(S[1]))
+			acm = []
+			for i in cm:
+				acm.append((FQ(i[0]), FQ(i[1])))
+			st = time.time()
+			tf = VerifyRevokeCred(kr,W,H,S,acm, delta, acc_pub_key,aggre_pub_key)
+			et = time.time()
+			print("kr_verify_time", et-st)
+			print("tf")
+			print(tf)
+			st = time.time()
+			tx_hash = acc_contract.functions.recieve_ya_share_revocation(int(args.id),accumulator_secret_key,s).transact({'from': args.address})
+			w3.eth.waitForTransactionReceipt(tx_hash)
+			et = time.time()
+			print("recieve_ya_share_time", et-st)
 		time.sleep(15)
 
 def updateRegistry():
@@ -469,14 +505,14 @@ def updateRegistry():
 	credential_id = params_contract.functions.getMapCredentials(args.title).call()
 
 	while updated_count < pending_requests_count:
-		sender,cm, ciphershare, public_m, vcerts, combination = pending_requests[updated_count]
+		sender,cm, ciphershare, public_m, vcerts, combination, kr = pending_requests[updated_count]
 		h = compute_hash(params, cm)
 		_, o, _, _, _, _ = params
 		issuing_session_id = int.from_bytes(to_binary256(h), 'big', signed=False)
 
 		Registry.setdefault(credential_id, {})
 		Registry[credential_id].setdefault(issuing_session_id, {})
-		Registry[credential_id][issuing_session_id].setdefault("private-share", elgamal_dec(params, osk, ciphershare) + multiply(ycG,sender_kr[sender]))
+		Registry[credential_id][issuing_session_id].setdefault("private-share", add(elgamal_dec(params, osk, ciphershare) ,multiply(ycG,kr)))
 		j = 0
 		public_share = None
 
@@ -548,6 +584,7 @@ def openingThread():
 		open_sigma = jsonpickle.decode(sigmaJSON)
 		updateRegistry()
 		opening_session_id = int.from_bytes(to_binary256(open_sigma[0]), 'big', signed=False)
+		st = time.time()
 		shareRegistry = PreOpening(params, Registry[credential_id], open_sigma)
 		send_open_shares = []
 		for issuing_session_id in shareRegistry:
@@ -570,7 +607,11 @@ def openingThread():
 			ret_shares.setdefault(int(opener_id), {})
 			ret_shares[int(opener_id)] = Reg[opener_id]
 
+		
 		issuing_session_id = OpenCred(params, ret_shares, indexes, open_sigma, to, Registry[credential_id], aggregate_vk)
+		et = time.time()
+		print("Credential openeing", et-st)
+		
 		if issuing_session_id == None:
 			print("No user matched")
 		else:

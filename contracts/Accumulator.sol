@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.7.0 <0.9.0;
-pragma experimental ABIEncoderV2;
-/** 
- * @title Ballot
- * @dev Implements voting process along with vote delegation
- */
 import { G } from "../libraries/G.sol";
 contract Accumulator{
 
@@ -17,8 +12,12 @@ contract Accumulator{
     uint private tv;
     //uint256[] private validators_share;
     //uint256[] private openers_share;
-    mapping(uint => uint256) private accumulator_key_shares;
+    mapping(uint => uint256[2]) private accumulator_key_shares;
+    mapping(uint => uint256) private accumulator_key_shares_2;
     mapping(uint256 => uint256) private id_kr;
+    mapping(uint256 => uint256) private flag;
+    uint256[2][] whitelist;
+    uint256[2][] blacklist;
     constructor() {
         owner = msg.sender;
     }
@@ -28,9 +27,10 @@ contract Accumulator{
         _;
     }
     
-    event send_key_shares(uint256[] validators_share, uint256[] openers_share);
-    event send_W_kr(uint256[2] W, uint256 request_id, uint256 kr);
+    event send_W_kr(uint256[2] W, uint256 request_id, uint256 kr, uint256 timestamp);
+    //event send_W_kr(uint256[2] W,G.G1Point delta, uint256 request_id);
     event send_updated_witness(G.G1Point delta);
+    event send_self_revocation(uint256 kr, uint256[] W,uint256[] H,uint256[] S, uint256[2][] cm);
 
     function lagrange_basis(uint[] memory indexes) public view returns(uint256[] memory){
             uint256 o = G.GEN_ORDER;
@@ -55,53 +55,97 @@ contract Accumulator{
             return l;
 
     }
-    function genAggregatedYa() public view returns(uint256){
+    function genAggregatedYa() public view returns(G.G1Point memory){
             uint256 [] memory indexes = new uint[](to);
-            uint256 [] memory filter = new uint[](to);
+            uint256[2][] memory filter = new uint[2][](to);
             uint u = 0;
             for (uint i=1; i<=no; i++) 
             {
-                if(accumulator_key_shares[i] !=0){
+                if(accumulator_key_shares[i][0] != 0 && accumulator_key_shares[i][1] != 0){
                     indexes[u] = i;
                     filter[u] = accumulator_key_shares[i];
                     u++;
                 }
             }
             uint256[] memory l = lagrange_basis(indexes);
-            uint256 aggr_ka = 0;
-            for (uint i=0; i<indexes.length; i++){
-                aggr_ka = addmod(aggr_ka ,(mulmod(filter[i], l[i], G.GEN_ORDER)),G.GEN_ORDER);
+            G.G1Point memory aggr_ka;
+            aggr_ka.X = filter[0][0];
+            aggr_ka.Y = filter[0][1];
+            aggr_ka = G.g1mul(aggr_ka, l[0]);
+            for (uint i=1; i<indexes.length; i++){
+                G.G1Point memory tmp;
+                tmp.X = filter[i][0];
+                tmp.Y = filter[i][1];
+                aggr_ka = G.g1add(aggr_ka ,(G.g1mul(tmp, l[i])));
             }
-
             return aggr_ka;
     }
-    function updateWitness(uint256 ya, uint256 kr) public {
-            delta = G.g1mul(delta, G._modInv(addmod(kr,ya,G.GEN_ORDER),G.GEN_ORDER));
-    }
-    function genWitness(uint256 ya,uint256 r) public view returns(G.G1Point memory){
-            G.G1Point memory kr = G.g1mul(delta, G._modInv(addmod(id_kr[r],ya,G.GEN_ORDER),G.GEN_ORDER));
-            return kr;
-    }
-    function recieve_ya_share_revocation(uint id, uint256 share, uint256 request_id) public {
-        accumulator_key_shares[id] = share;
-        uint count = 0;
-        for (uint i=1; i<=no; i++) 
-        {
-            if(accumulator_key_shares[i] !=0) count++;
-        }
-        if(count==to){
-            uint256 Ya = genAggregatedYa();
-            updateWitness(Ya, id_kr[request_id]);
+
+    function genAggregatedYa_2() public view returns(uint256){
+            uint256 [] memory indexes = new uint[](to);
+            uint256[] memory filter = new uint[](to);
+            uint u = 0;
             for (uint i=1; i<=no; i++) 
             {
-               accumulator_key_shares[i] =0;
+                if(accumulator_key_shares_2[i] != 0){
+                    indexes[u] = i;
+                    filter[u] = accumulator_key_shares_2[i];
+                    u++;
+                }
+            }
+            uint256[] memory l = lagrange_basis(indexes);
+            uint256 aggr_ka = 0;
+            for (uint i=0; i<indexes.length; i++){
+                aggr_ka = addmod(aggr_ka, mulmod(filter[i], l[i], G.GEN_ORDER), G.GEN_ORDER);
+            }
+            return aggr_ka;
+    }
+
+    function updateDelta(uint256 ya, uint256 kr) public {
+            delta = G.g1mul(delta, G._modInv(addmod(kr,ya,G.GEN_ORDER),G.GEN_ORDER));
+    }
+    function get_delta() public view returns(uint256, uint256){
+        return (delta.X, delta.Y);
+    }
+    function recieve_ya_share_revocation(uint id, uint256 share, uint256 request_id) public {
+        accumulator_key_shares_2[id] = share;
+        uint count = 0;
+        for (uint i=1; i<=no; i++)
+        {
+            if(accumulator_key_shares_2[i] != 0) count++;
+        }
+        if(count==to){
+            uint256 Ya = genAggregatedYa_2();
+            updateDelta(Ya, id_kr[request_id]);
+            blacklist.push([id_kr[request_id], block.timestamp]);
+            for (uint i=1; i<=no; i++) 
+            {
+               accumulator_key_shares_2[i] = 0;
             }
             emit send_updated_witness(delta);
         }
         
     }
 
-    function hash_to_G1(G.G1Point memory m) public view returns (G.G1Point memory){
+    function verify_revocation_request(uint256 kr,  G.G1Point memory witness, G.G1Point memory H, G.G1Point memory S, G.G1Point[] memory commitments) public{
+            uint256[] memory a = new uint256[](2);
+            uint256[] memory b = new uint256[](2);
+            uint256[] memory c = new uint256[](2);
+            uint256[2][] memory cm = new uint256[2][](commitments.length);
+            a[0] = witness.X;
+            a[1] = witness.Y;
+            b[0] = H.X;
+            b[1] = H.Y;
+            c[0] = S.X;
+            c[1] = S.Y;
+            for(uint i =0;i<commitments.length;i++){
+                cm[i][0] = commitments[i].X;
+                cm[i][1] = commitments[i].Y;
+            }
+            
+            emit send_self_revocation(kr,a, b,c, cm);
+    }
+    function hash_to_G1(G.G1Point memory m) private view returns (G.G1Point memory){
         uint256 cm = m.X;
         uint256 cm2 = m.Y;
         bytes32 bcm = bytes32(cm);
@@ -117,7 +161,7 @@ contract Accumulator{
         return G.HashToPoint(id);
     }
 
-    function hash_to_int(G.G1Point memory a) public view returns(uint256){
+    function hash_to_int(G.G1Point memory a) private view returns(uint256){
         G.G1Point memory b = hash_to_G1(a);
         uint256 cm = b.X;
         uint256 cm2 = b.Y;
@@ -134,27 +178,49 @@ contract Accumulator{
         return id;
     }
 
-    function recieve_ya_share(uint id, uint256 share, uint256 request_id) public {
-        accumulator_key_shares[id] = share;
+    function recieve_ya_share(uint id, G.G1Point memory share, uint256 request_id) public {
+        if(flag[request_id] == 1) return;
+
+        accumulator_key_shares[id][0] = share.X;
+        accumulator_key_shares[id][1] = share.Y;
         uint count = 0;
-        G.G1Point memory W;
         for (uint i=1; i<=no; i++) 
         {
-            if(accumulator_key_shares[i] !=0) count++;
+            if(accumulator_key_shares[i][0] != 0 && accumulator_key_shares[i][1] != 0) count++;
         }
         if(count==to){
-            uint256 Ya = genAggregatedYa();
-            W = genWitness(Ya,request_id);
+            uint256[2] memory W = [delta.X,delta.Y];
+            delta = genAggregatedYa();       
             for (uint i=1; i<=no; i++) 
             {
-               accumulator_key_shares[i] =0;
+               accumulator_key_shares[i] = [0,0];
             }
-            uint256[2] memory W_m = [W.X, W.Y];
-            emit send_W_kr(W_m,request_id,id_kr[request_id]);
+
+            whitelist.push([id_kr[request_id],block.timestamp]);
+            flag[request_id] = 1;
+            emit send_W_kr(W,request_id,id_kr[request_id], block.timestamp);
+            //emit send_W_kr(W_m,delta,request_id);
         }
         
     }
 
+    function updateWitness(uint256 time) public view returns (uint256[] memory, uint256[] memory, uint256 ){
+            uint256[] memory w1 = new uint256[](whitelist.length);
+            uint256[] memory b1 = new uint256[](blacklist.length);
+            uint c = 0;
+            for(uint i = whitelist.length-1; i>=0;i--){
+                if(whitelist[i][1] < time) break;
+                w1[c] = whitelist[i][0];
+                c++;
+            }
+            c = 0;
+            for(uint i = blacklist.length-1; i>=0;i--){
+                if(blacklist[i][1] < time) break;
+                b1[c] = blacklist[i][0];
+                c++;
+            }
+            return (w1,b1, block.timestamp);
+    }
     function set_accumulator(uint _no,uint _to,uint _nv,uint _tv) public {
         delta = G.P1();
         no = _no;
@@ -163,7 +229,8 @@ contract Accumulator{
         tv = _tv;
         for (uint i=1; i<=no; i++) 
         {
-            accumulator_key_shares[i] = 0;
+            accumulator_key_shares[i] = [0,0];
+            accumulator_key_shares_2[i] = 0;
         }
     }
 
@@ -183,6 +250,7 @@ contract Accumulator{
         uint256[] memory openers_share = new uint256[](no);
         uint256 kr = gen_random();
         id_kr[hash_to_int(cm)] = kr;
+        
         poly_validators[0] = kr;
         poly_openers[0] = kr;
         for(uint i=1; i<tv; i++){
@@ -201,9 +269,8 @@ contract Accumulator{
         return (validators_share, openers_share);
     }
 
-    function gen_random() public returns(uint256){
+    function gen_random() private returns(uint256){
         randNonce++;
         return uint256(keccak256(abi.encodePacked(block.timestamp,msg.sender,randNonce))) % G.GEN_ORDER;
     }
-
 }

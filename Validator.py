@@ -334,8 +334,10 @@ def issuePartialCredentials(pending_requests_count, served_count, sk):
 			encoded_public_m.append(int.from_bytes(sha256(public_m[i].encode("utf8").strip()).digest(), "big") % o)
 
 	Lambda = (cm, commitments)
+	st  = time.time()
 	blind_sig = BlindSignAttr(params, sk,kr,Lambda, encoded_public_m)
-
+	et = time.time()
+	print("BlindSignAttr", et-st)
 	send_h = [blind_sig[0][0].n, blind_sig[0][1].n]
 	send_t = [blind_sig[1][0].n, blind_sig[1][1].n]
 
